@@ -50,3 +50,29 @@
 [2026-05-20 15:42:08] Status 400 received
 [2026-05-20 15:42:08] Empty response, skipping.
 [2026-05-20 15:42:08] === Run complete ===
+[2026-05-20 18:24:38] === Truck alert run started ===
+[2026-05-20 18:24:38] Checking search...
+[2026-05-20 18:24:48] Status 400 received
+[2026-05-20 18:24:48] Empty response, skipping.
+[2026-05-20 18:24:48] Checking search...
+[2026-05-20 18:24:58] Status 400 received
+[2026-05-20 18:24:58] Empty response, skipping.
+[2026-05-20 18:24:58] Checking search...
+[2026-05-20 18:25:14] Status 400 received
+[2026-05-20 18:25:14] Empty response, skipping.
+[2026-05-20 18:25:14] Checking search...
+[2026-05-20 18:25:22] Status 400 received
+[2026-05-20 18:25:22] Empty response, skipping.
+[2026-05-20 18:25:22] Checking search...
+[2026-05-20 18:25:37] Status 400 received
+[2026-05-20 18:25:37] Empty response, skipping.
+[2026-05-20 18:25:37] Checking search...
+[2026-05-20 18:25:52] Status 400 received
+[2026-05-20 18:25:52] Empty response, skipping.
+[2026-05-20 18:25:52] Checking search...
+[2026-05-20 18:26:05] Status 400 received
+[2026-05-20 18:26:05] Empty response, skipping.
+[2026-05-20 18:26:05] Checking search...
+[2026-05-20 18:26:16] Status 400 received
+[2026-05-20 18:26:16] Empty response, skipping.
+[2026-05-20 18:26:16] === Run complete ===
