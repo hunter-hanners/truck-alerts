@@ -1,4 +1,7 @@
 Marketplace Monitoring & Automated Alert System
+
+
+
 A Python + Playwright browser automation platform that continuously monitors Facebook Marketplace for target vehicle listings and delivers real-time Discord alerts — before other buyers see them.
 Built to solve a real problem: Facebook killed native listing alerts years ago, and paid alternatives cost monthly subscriptions. This system replicates and exceeds that functionality for free.
 
