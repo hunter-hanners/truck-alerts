@@ -1,37 +1,45 @@
-import requests
-import json
 import os
+import json
 import re
 import time
 import random
 from datetime import datetime
+from playwright.sync_api import sync_playwright
+import requests
 
-DISCORD_WEBHOOK = os.environ["DISCORD_WEBHOOK"]
+# ── Configuration ──────────────────────────────────────────────
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SEEN_FILE = os.path.join(BASE_DIR, "seen.json")
+LOG_FILE  = os.path.join(BASE_DIR, "truck_log.txt")
+FB_PROFILE = os.path.join(BASE_DIR, "fb_profile")
+
+DISCORD_WEBHOOK = "********"
 
 SEARCHES = [
     # TOYOTA TACOMA (2013-2015 sweet spot)
     "https://www.facebook.com/marketplace/gadsden/search?query=tacoma%204x4&minPrice=5000&maxPrice=20000&radius=200&minYear=2013&maxYear=2015",
     "https://www.facebook.com/marketplace/gadsden/search?query=tacoma%20trd&minPrice=5000&maxPrice=20000&radius=200&minYear=2013&maxYear=2015",
-    # TOYOTA TACOMA (2018-2021 best 3rd gen)
+    # TOYOTA TACOMA (2018-2021)
     "https://www.facebook.com/marketplace/gadsden/search?query=tacoma%204x4&minPrice=5000&maxPrice=20000&radius=200&minYear=2018&maxYear=2021",
     "https://www.facebook.com/marketplace/gadsden/search?query=tacoma%20trd&minPrice=5000&maxPrice=20000&radius=200&minYear=2018&maxYear=2021",
-    # TOYOTA TUNDRA (2014-2021 reliable years)
+    # TOYOTA TUNDRA (2014-2021)
     "https://www.facebook.com/marketplace/gadsden/search?query=tundra%204x4&minPrice=5000&maxPrice=20000&radius=200&minYear=2014&maxYear=2021",
     "https://www.facebook.com/marketplace/gadsden/search?query=tundra%20crewmax&minPrice=5000&maxPrice=20000&radius=200&minYear=2014&maxYear=2021",
-    # NISSAN FRONTIER (2014-2019 safe years only)
+    # NISSAN FRONTIER (2014-2019)
     "https://www.facebook.com/marketplace/gadsden/search?query=frontier%204x4&minPrice=5000&maxPrice=20000&radius=200&minYear=2014&maxYear=2019",
     "https://www.facebook.com/marketplace/gadsden/search?query=frontier%20pro-4x&minPrice=5000&maxPrice=20000&radius=200&minYear=2014&maxYear=2019",
+    # TOYOTA 4RUNNER (2005-2021)
+    "https://www.facebook.com/marketplace/gadsden/search?query=4runner%204x4&minPrice=5000&maxPrice=20000&radius=200&minYear=2005&maxYear=2021",
+    "https://www.facebook.com/marketplace/gadsden/search?query=4runner%20trd&minPrice=5000&maxPrice=20000&radius=200&minYear=2005&maxYear=2021",
+    "https://www.facebook.com/marketplace/gadsden/search?query=4runner%20v8&minPrice=5000&maxPrice=20000&radius=200&minYear=2005&maxYear=2009",
+    # LEXUS GX460 (2010-2019)
+    "https://www.facebook.com/marketplace/gadsden/search?query=gx460&minPrice=5000&maxPrice=20000&radius=200&minYear=2010&maxYear=2019",
+    "https://www.facebook.com/marketplace/gadsden/search?query=lexus%20gx%20460&minPrice=5000&maxPrice=20000&radius=200&minYear=2010&maxYear=2019",
+    # LEXUS GX470 (2003-2009)
+    "https://www.facebook.com/marketplace/gadsden/search?query=gx470&minPrice=5000&maxPrice=20000&radius=200&minYear=2003&maxYear=2009",
+    "https://www.facebook.com/marketplace/gadsden/search?query=lexus%20gx470&minPrice=5000&maxPrice=20000&radius=200&minYear=2003&maxYear=2009",
+    "https://www.facebook.com/marketplace/gadsden/search?query=lexus%20gx&minPrice=5000&maxPrice=20000&radius=200&minYear=2003&maxYear=2009",
 ]
-
-SEEN_FILE = "seen.json"
-LOG_FILE = "truck_log.txt"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Connection": "keep-alive"
-}
 
 SKIP_KEYWORDS = [
     "salvage", "rebuilt", "rebuildable", "wrecked", "parts only",
@@ -41,16 +49,18 @@ SKIP_KEYWORDS = [
     "250k", "275k", "300k", "325k", "350k",
     "transmission only", "engine only", "motor only",
     "dealer", "financing available", "buy here pay here",
-    "bhph", "no credit", "bad credit"
+    "manual", "6-speed manual", "5-speed manual", "stick shift"
 ]
 
 BAD_PRICES = ["$1", "$9", "$99", "$100", "$123", "$321", "$999", "$1,000", "$1,234"]
 
 VALID_KEYWORDS = [
     "tacoma", "tundra", "frontier",
-    "toyota pickup", "trd off road", "trd sport", "trd pro"
+    "toyota pickup", "trd off road", "trd sport", "trd pro",
+    "4runner", "gx460", "gx470", "gx 460", "gx 470", "lexus gx"
 ]
 
+# ── Helpers ─────────────────────────────────────────────────────
 def log(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{timestamp}] {message}"
@@ -72,22 +82,16 @@ def save_seen(seen):
         json.dump(list(seen), f)
 
 def is_high_mileage(title):
-    # Catches: 230k, 230k miles, 230k mi, 230 k miles
-    mileage_match = re.search(r'(\d{2,3})\s*k', title.lower())
-    if mileage_match:
-        mileage = int(mileage_match.group(1))
-        if mileage > 220:
-            return True
+    match = re.search(r'(\d{2,3})\s*k', title.lower())
+    if match and int(match.group(1)) > 220:
+        return True
     return False
 
-def is_bad_price(price):
-    return price in BAD_PRICES
-
 def is_bad_listing(title):
-    title_lower = title.lower()
-    if not any(word in title_lower for word in VALID_KEYWORDS):
+    t = title.lower()
+    if not any(w in t for w in VALID_KEYWORDS):
         return True
-    if any(word in title_lower for word in SKIP_KEYWORDS):
+    if any(w in t for w in SKIP_KEYWORDS):
         return True
     if is_high_mileage(title):
         return True
@@ -101,9 +105,9 @@ def send_discord(title, price, location, url):
             "description": f"**{title}**",
             "color": 3066993,
             "fields": [
-                {"name": "💰 Price", "value": price, "inline": True},
-                {"name": "📍 Location", "value": location, "inline": True},
-                {"name": "🕐 Found", "value": timestamp, "inline": False}
+                {"name": "💰 Price",    "value": price,     "inline": True},
+                {"name": "📍 Location", "value": location,  "inline": True},
+                {"name": "🕐 Found",    "value": timestamp, "inline": False}
             ],
             "url": url,
             "footer": {"text": "Hunter's Truck Alert System"}
@@ -115,98 +119,140 @@ def send_discord(title, price, location, url):
     except Exception as e:
         log(f"Discord send failed: {e}")
 
-def check_marketplace(url):
+def send_discord_warning(message):
+    payload = {"content": f"⚠️ **Truck Alert System Warning:**\n{message}"}
     try:
-        time.sleep(random.uniform(8.0, 15.0))
-        resp = requests.get(url, headers=HEADERS, timeout=20)
-        if resp.status_code == 200:
-            return resp.text
-        else:
-            log(f"Status {resp.status_code} received")
-            return ""
-    except Exception as e:
-        log(f"Fetch error: {e}")
-        return ""
+        requests.post(DISCORD_WEBHOOK, json=payload, timeout=10)
+    except Exception:
+        pass
 
 def parse_listings(html):
     listings = []
     seen_ids = set()
-
-    # Block isolation — parse each listing chunk independently
-    # so a missing field in one listing doesn't corrupt the others
     block_pattern = r'{"id":"\d{10,}".*?"marketplace_listing_title":"[^"]+".*?}'
-    blocks = re.findall(block_pattern, html)
-
-    for block in blocks:
+    for block in re.findall(block_pattern, html):
         try:
-            id_match = re.search(r'"id":"(\d{10,})"', block)
-            title_match = re.search(r'"marketplace_listing_title":"([^"]+)"', block)
-            price_match = re.search(r'"amount":"([^"]+)"', block)
-            city_match = re.search(r'"city":"([^"]+)"', block)
-
-            if id_match and title_match:
-                listing_id = id_match.group(1)
-                if listing_id in seen_ids:
+            id_m    = re.search(r'"id":"(\d{10,})"', block)
+            title_m = re.search(r'"marketplace_listing_title":"([^"]+)"', block)
+            price_m = re.search(r'"amount":"([^"]+)"', block)
+            city_m  = re.search(r'"city":"([^"]+)"', block)
+            if id_m and title_m:
+                lid = id_m.group(1)
+                if lid in seen_ids:
                     continue
-                seen_ids.add(listing_id)
-
-                title = title_match.group(1)
-                price = f"${price_match.group(1)}" if price_match else "See listing"
-                city = city_match.group(1) if city_match else "Nearby"
-
+                seen_ids.add(lid)
                 listings.append({
-                    "id": listing_id,
-                    "title": title,
-                    "price": price,
-                    "location": city,
-                    "url": f"https://www.facebook.com/marketplace/item/{listing_id}/"
+                    "id":       lid,
+                    "title":    title_m.group(1),
+                    "price":    f"${price_m.group(1)}" if price_m else "See listing",
+                    "location": city_m.group(1) if city_m else "Nearby",
+                    "url":      f"https://www.facebook.com/marketplace/item/{lid}/"
                 })
         except Exception:
             continue
-
     return listings
 
+# ── Main ────────────────────────────────────────────────────────
 def main():
     log("=== Truck alert run started ===")
     seen = load_seen()
 
-    for search_url in SEARCHES:
-        log(f"Checking search...")
-        html = check_marketplace(search_url)
-        if not html:
-            log("Empty response, skipping.")
-            continue
+    with sync_playwright() as p:
+        context = p.chromium.launch_persistent_context(
+            FB_PROFILE,
+            headless=True,
+            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800}
+        )
+        page = context.new_page()
 
-        listings = parse_listings(html)
-        log(f"Found {len(listings)} raw results")
+        # ── Login check ────────────────────────────────────────
+        log("Checking Facebook login status...")
+        try:
+            page.goto("https://www.facebook.com/marketplace/",
+                      wait_until="domcontentloaded", timeout=60000)
+            time.sleep(3)
+        except Exception as e:
+            log(f"Failed to load Facebook: {e}")
+            send_discord_warning("Could not load Facebook. Check your internet connection.")
+            context.close()
+            return
 
-        state_changed = False
-        for listing in listings:
-            if listing["id"] not in seen:
-                if is_bad_listing(listing["title"]):
-                    log(f"Filtered: {listing['title']}")
+        # If session expired, alert Discord and exit cleanly instead of hanging
+        content = page.content()
+        if "login" in page.url.lower() or "log in to facebook" in content.lower():
+            log("⚠️ Facebook session expired. Manual re-login required.")
+            send_discord_warning(
+    "Your Facebook session expired. To fix:\n"
+    "1. Open monitor.py and change headless=True to headless=False\n"
+    "2. Run python3 ~/truck-alerts/monitor.py in Terminal\n"
+    "3. Log into Facebook in the browser window that opens\n"
+    "4. Change headless back to True\n"
+    "Crontab will resume automatically after that."
+)
+            context.close()
+            return
+
+        log("✅ Facebook session active. Starting searches...")
+
+        # ── Search loop ────────────────────────────────────────
+        for search_url in SEARCHES:
+            log("Checking search...")
+            try:
+                page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
+                time.sleep(random.uniform(5.0, 10.0))
+
+                # Scroll down to trigger lazy-load
+                page.evaluate("window.scrollBy(0, 800)")
+                time.sleep(2)
+
+                html = page.content()
+            except Exception as e:
+                log(f"Page load error: {e}")
+                continue
+
+            listings = parse_listings(html)
+            log(f"Found {len(listings)} raw results")
+
+            state_changed = False
+            for listing in listings:
+                if listing["id"] not in seen:
+                    if is_bad_listing(listing["title"]):
+                        log(f"Filtered: {listing['title']}")
+                        seen.add(listing["id"])
+                        state_changed = True
+                        continue
+                    if listing["price"] in BAD_PRICES:
+                        log(f"Bad price filtered: {listing['price']}")
+                        seen.add(listing["id"])
+                        state_changed = True
+                        continue
+                    send_discord(
+                        listing["title"],
+                        listing["price"],
+                        listing["location"],
+                        listing["url"]
+                    )
                     seen.add(listing["id"])
                     state_changed = True
-                    continue
-                if is_bad_price(listing["price"]):
-                    log(f"Bad price filtered: {listing['price']} — {listing['title']}")
-                    seen.add(listing["id"])
-                    state_changed = True
-                    continue
 
-                send_discord(
-                    listing["title"],
-                    listing["price"],
-                    listing["location"],
-                    listing["url"]
-                )
-                seen.add(listing["id"])
-                state_changed = True
+            if state_changed:
+                save_seen(seen)
 
-        if state_changed:
-            save_seen(seen)
-
+        # Send heartbeat every 90 minutes
+        now = datetime.now()
+        minutes_since_midnight = now.hour * 60 + now.minute
+        if minutes_since_midnight % 90 < 31:
+            send_discord_warning("✅ Truck Alert System is running normally. No issues detected.")
+        context.close()
     log("=== Run complete ===")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        try:
+            send_discord_warning(f"Script crashed unexpectedly:\n`{e}`")
+        except Exception:
+            pass
+        raise
